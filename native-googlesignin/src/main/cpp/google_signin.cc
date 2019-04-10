@@ -17,6 +17,7 @@
 #include <cassert>
 #include "google_signin_user_impl.h"
 #include "jni_init.h"
+#include <string.h>
 
 #define TAG "native-googlesignin"
 #define HELPER_CLASSNAME "com/google/googlesignin/GoogleSignInHelper"

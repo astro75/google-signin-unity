@@ -24,7 +24,9 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.view.View;
 import com.google.android.gms.auth.api.Auth;
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptionsExtension;
 import com.google.android.gms.auth.api.signin.GoogleSignInResult;
@@ -32,8 +34,13 @@ import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.Api;
 import com.google.android.gms.common.api.CommonStatusCodes;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.OptionalPendingResult;
 import com.google.android.gms.common.api.ResultCallback;
 import com.google.android.gms.common.api.Scope;
+import com.google.android.gms.common.api.Status;
+import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.Task;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -43,80 +50,66 @@ import java.util.Locale;
  * Activity fragment with no UI added to the parent activity in order to manage the accessing of the
  * player's email address and tokens.
  */
-public class GoogleSignInFragment extends Fragment implements
-        GoogleApiClient.ConnectionCallbacks,
-        GoogleApiClient.OnConnectionFailedListener {
+public class GoogleSignInFragment extends Fragment {
 
   // Tag uniquely identifying this fragment.
   public static final String FRAGMENT_TAG = "signin.SignInFragment";
   private static final int RC_SIGNIN = 9009;
 
-  /**
-   * Handle the Google API Client connection being connected.
-   *
-   * @param connectionHint - is not used.
-   */
-  @Override
-  public void onConnected(@Nullable Bundle connectionHint) {
-    GoogleSignInHelper.logDebug("onConnected!");
-    if (mGoogleApiClient.hasConnectedApi(Auth.GOOGLE_SIGN_IN_API)) {
-      GoogleSignInHelper.logDebug("has connected auth!");
-      Auth.GoogleSignInApi.silentSignIn(mGoogleApiClient)
-          .setResultCallback(
-              new ResultCallback<GoogleSignInResult>() {
-                @Override
-                public void onResult(@NonNull GoogleSignInResult googleSignInResult) {
-                  if (googleSignInResult.isSuccess()) {
-                    GoogleSignInHelper.nativeOnResult(
-                        request.getHandle(),
-                        googleSignInResult.getStatus().getStatusCode(),
-                        googleSignInResult.getSignInAccount());
-                    setState(State.READY);
-                  } else {
-                    GoogleSignInHelper.logError(
-                        "Error with " + "silentSignIn: " + googleSignInResult.getStatus());
-                    GoogleSignInHelper.nativeOnResult(
-                        request.getHandle(),
-                        googleSignInResult.getStatus().getStatusCode(),
-                        googleSignInResult.getSignInAccount());
-                    setState(State.READY);
-                  }
-                }
-              });
-    } else {
-      Intent signInIntent = Auth.GoogleSignInApi.getSignInIntent(mGoogleApiClient);
-      startActivityForResult(signInIntent, RC_SIGNIN);
-    }
+
+  private void startSilentSignIn() {
+    mSignInClient
+      .silentSignIn()
+      .addOnCompleteListener(
+        getActivity(),
+        new OnCompleteListener<GoogleSignInAccount>() {
+          @Override
+          public void onComplete(@NonNull Task<GoogleSignInAccount> task) {
+            if (task.isSuccessful()) {
+              // The signed in account is stored in the task's result.
+              GoogleSignInAccount signedInAccount = task.getResult();
+              GoogleSignInHelper.nativeOnResult(
+                      request.getHandle(),
+                      Status.RESULT_SUCCESS.getStatusCode(),
+                      signedInAccount);
+              setState(State.READY);
+            } else {
+              // Player will need to sign-in explicitly using via UI.
+              // See [sign-in best practices](http://developers.google.com/games/services/checklist) for guidance on how and when to implement Interactive Sign-in,
+              // and [Performing Interactive Sign-in](http://developers.google.com/games/services/android/signin#performing_interactive_sign-in) for details on how to implement
+              // Interactive Sign-in.
+              GoogleSignInHelper.nativeOnResult(
+                      request.getHandle(),
+                      Status.RESULT_CANCELED.getStatusCode(),
+                      null);
+              setState(State.READY);
+            }
+          }
+        });
   }
 
-  @Override
-  public void onConnectionSuspended(int cause) {
-    GoogleSignInHelper.logDebug("onConnectionSuspended() called: " + cause);
-  }
-
-
-  @Override
-  public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-    // Handle errors during connection, such as Play Store not installed.
-    GoogleSignInHelper.logError("Connection failed: " +
-            connectionResult.getErrorCode());
-    // if there is a resolution, just start the sign-in intent, which handles
-    // the resolution logic.
-    if (connectionResult.hasResolution()) {
-      Intent signInIntent = Auth.GoogleSignInApi.getSignInIntent(mGoogleApiClient);
-      startActivityForResult(signInIntent, RC_SIGNIN);
-    } else {
+  private void gotSignInResult(@NonNull GoogleSignInResult googleSignInResult) {
+    if (googleSignInResult.isSuccess()) {
       GoogleSignInHelper.nativeOnResult(
               request.getHandle(),
-              connectionResult.getErrorCode(),
-              null);
+              googleSignInResult.getStatus().getStatusCode(),
+              googleSignInResult.getSignInAccount());
+      setState(State.READY);
+    } else {
+      GoogleSignInHelper.logError(
+              "Error with " + "silentSignIn: " + googleSignInResult.getStatus());
+      GoogleSignInHelper.nativeOnResult(
+              request.getHandle(),
+              googleSignInResult.getStatus().getStatusCode(),
+              googleSignInResult.getSignInAccount());
+      setState(State.READY);
     }
   }
 
   public void disconnect() {
 
-    if (mGoogleApiClient != null) {
-      mGoogleApiClient.disconnect();
+    if (mSignInClient != null) {
+      mSignInClient.revokeAccess();
     }
   }
 
@@ -140,7 +133,7 @@ public class GoogleSignInFragment extends Fragment implements
    */
   private TokenRequest request = null;
 
-  private GoogleApiClient mGoogleApiClient;
+  private GoogleSignInClient mSignInClient;
 
   // TODO: make config async.
   private static GoogleSignInFragment theFragment;
@@ -192,8 +185,8 @@ public class GoogleSignInFragment extends Fragment implements
    */
   public void signOut() {
     clearRequest(true);
-    if (mGoogleApiClient != null) {
-      Auth.GoogleSignInApi.signOut(mGoogleApiClient);
+    if (mSignInClient != null) {
+      mSignInClient.signOut();
     }
   }
 
@@ -286,36 +279,16 @@ public class GoogleSignInFragment extends Fragment implements
       // Build the GoogleAPIClient
       buildClient(request);
 
-      GoogleSignInHelper.logDebug(
-              " Has connected == " + mGoogleApiClient.hasConnectedApi(Auth.GOOGLE_SIGN_IN_API));
-      if (!mGoogleApiClient.hasConnectedApi(Auth.GOOGLE_SIGN_IN_API)) {
+      GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(getActivity());
+      boolean connected = account != null;
 
+      GoogleSignInHelper.logDebug(
+              " Has connected == " +connected);
+      if (!connected) {
         if (!silent) {
-          Intent signInIntent = Auth.GoogleSignInApi.getSignInIntent(mGoogleApiClient);
-          startActivityForResult(signInIntent, RC_SIGNIN);
+          startActivityForResult(mSignInClient.getSignInIntent(), RC_SIGNIN);
         } else {
-          Auth.GoogleSignInApi.silentSignIn(mGoogleApiClient)
-                  .setResultCallback(
-                          new ResultCallback<GoogleSignInResult>() {
-                            @Override
-                            public void onResult(@NonNull GoogleSignInResult googleSignInResult) {
-                              if (googleSignInResult.isSuccess()) {
-                                GoogleSignInHelper.nativeOnResult(
-                                        request.getHandle(),
-                                        googleSignInResult.getStatus().getStatusCode(),
-                                        googleSignInResult.getSignInAccount());
-                                setState(State.READY);
-                              } else {
-                                GoogleSignInHelper.logError(
-                                        "Error with " + "silentSignIn: " + googleSignInResult.getStatus());
-                                GoogleSignInHelper.nativeOnResult(
-                                        request.getHandle(),
-                                        googleSignInResult.getStatus().getStatusCode(),
-                                        googleSignInResult.getSignInAccount());
-                                setState(State.READY);
-                              }
-                            }
-                          });
+          startSilentSignIn();
         }
       }
     } catch (Throwable throwable) {
@@ -397,28 +370,7 @@ public class GoogleSignInFragment extends Fragment implements
     }
 
     GoogleSignInOptions options = builder.build();
-
-    GoogleApiClient.Builder clientBuilder =
-        new GoogleApiClient.Builder(getActivity()).addApi(Auth.GOOGLE_SIGN_IN_API, options);
-    if (request.getUseGamesConfig()) {
-      GoogleSignInHelper.logDebug("Adding games API");
-
-      try {
-        clientBuilder.addApi(getGamesAPI());
-      } catch (Exception e) {
-        GoogleSignInHelper.logError("Exception getting Games API: " + e.getMessage());
-        request.setResult(CommonStatusCodes.DEVELOPER_ERROR, null);
-        return;
-      }
-    }
-    if (request.getHidePopups()) {
-      View invisible = new View(getActivity());
-      invisible.setVisibility(View.INVISIBLE);
-      invisible.setClickable(false);
-      clientBuilder.setViewForPopups(invisible);
-    }
-    mGoogleApiClient = clientBuilder.build();
-    mGoogleApiClient.connect(GoogleApiClient.SIGN_IN_MODE_OPTIONAL);
+    mSignInClient = GoogleSignIn.getClient(getActivity(), options);
   }
 
   private Api<? extends Api.ApiOptions.NotRequiredOptions> getGamesAPI() {
@@ -480,9 +432,9 @@ public class GoogleSignInFragment extends Fragment implements
     // This just connects the client.  If there is no user signed in, you
     // still need to call Auth.GoogleSignInApi.getSignInIntent() to start
     // the sign-in process.
-    if (mGoogleApiClient != null) {
-      mGoogleApiClient.connect(GoogleApiClient.SIGN_IN_MODE_OPTIONAL);
-    }
+//    if (mGoogleApiClient != null) {
+//      mGoogleApiClient.connect(GoogleApiClient.SIGN_IN_MODE_OPTIONAL);
+//    }
   }
 
   /**

@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "google_signin.h"
+#include <string.h>
 
 // Wrapper for the GoogleSignIn object when returning it via the extern
 // "C" interface.
