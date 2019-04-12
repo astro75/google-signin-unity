@@ -256,40 +256,33 @@ public class GoogleSignInFragment extends Fragment {
       }
 
       request
-              .getPendingResponse()
-              .setResultCallback(
-                      new ResultCallback<TokenResult>() {
-                        @Override
-                        public void onResult(@NonNull TokenResult tokenResult) {
-                          GoogleSignInHelper.logDebug(
-                                  String.format(
-                                          Locale.getDefault(),
-                                          "Calling nativeOnResult: handle: %s, status: %d acct: %s",
-                                          tokenResult.getHandle(),
-                                          tokenResult.getStatus().getStatusCode(),
-                                          tokenResult.getAccount()));
-                          GoogleSignInHelper.nativeOnResult(
-                                  tokenResult.getHandle(),
-                                  tokenResult.getStatus().getStatusCode(),
-                                  tokenResult.getAccount());
-                          clearRequest(false);
-                        }
-                      });
+        .getPendingResponse()
+        .setResultCallback(
+          new ResultCallback<TokenResult>() {
+            @Override
+            public void onResult(@NonNull TokenResult tokenResult) {
+              GoogleSignInHelper.logDebug(
+                      String.format(
+                              Locale.getDefault(),
+                              "Calling nativeOnResult: handle: %s, status: %d acct: %s",
+                              tokenResult.getHandle(),
+                              tokenResult.getStatus().getStatusCode(),
+                              tokenResult.getAccount()));
+              GoogleSignInHelper.nativeOnResult(
+                      tokenResult.getHandle(),
+                      tokenResult.getStatus().getStatusCode(),
+                      tokenResult.getAccount());
+              clearRequest(false);
+            }
+          });
 
       // Build the GoogleAPIClient
       buildClient(request);
 
-      GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(getActivity());
-      boolean connected = account != null;
-
-      GoogleSignInHelper.logDebug(
-              " Has connected == " +connected);
-      if (!connected) {
-        if (!silent) {
-          startActivityForResult(mSignInClient.getSignInIntent(), RC_SIGNIN);
-        } else {
-          startSilentSignIn();
-        }
+      if (!silent) {
+        startActivityForResult(mSignInClient.getSignInIntent(), RC_SIGNIN);
+      } else {
+        startSilentSignIn();
       }
     } catch (Throwable throwable) {
       GoogleSignInHelper.logError("Exception caught! " + throwable.getMessage());
